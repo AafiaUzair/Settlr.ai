@@ -26,7 +26,13 @@
         then uncomment the tag below. Left commented so the demo runs with
         zero 404s / console noise when no local secrets file exists.
     -->
-    <script src="env.local.js"></script>
+   <script>
+  window.__SETTLR_ENV__ = window.__SETTLR_ENV__ || {
+    EMAILJS_PUBLIC_KEY: "zgVde-rm8jjxuwaY8",
+    EMAILJS_SERVICE_ID: "service_yrl81vs",
+    EMAILJS_TEMPLATE_ID: "template_432uusp"
+  };
+</script>
 
     <style>
         input[type="range"].settlr-range {
