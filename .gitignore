@@ -1,0 +1,53 @@
+# ─── Secrets & environment ──────────────────────────────────────────────
+# Never commit real credentials. `.env.example` is the only tracked template.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+secrets.json
+credentials.json
+serviceAccount*.json
+
+# Static-site secrets bridge used by the single-file demo.
+# Holds `window.__SETTLR_ENV__ = { EMAILJS_PUBLIC_KEY: ... }`. Must stay local.
+env.local.js
+env.js
+config.local.js
+
+# ─── Dependencies ───────────────────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.js
+package-lock.json.bak
+
+# ─── Build & tooling output ─────────────────────────────────────────────
+dist/
+build/
+out/
+.cache/
+.parcel-cache/
+.vite/
+*.tsbuildinfo
+
+# ─── Generated artifacts ────────────────────────────────────────────────
+# Exported mediation memorandums contain party PII.
+Settlr_Resolution_*.pdf
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ─── Editors & OS ───────────────────────────────────────────────────────
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# VS Code: keep shared settings, ignore user-local ones.
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json

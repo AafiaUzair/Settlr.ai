@@ -1,0 +1,1959 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settlr.ai - AI Neutral Mediator</title>
+    <meta name="description" content="Settlr.ai — AI-powered neutral dispute mediator. Bias-filtered fact extraction, evidence OCR, financial split modelling and binding memorandum export.">
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- EmailJS (client-side delivery of Party B case invites) -->
+    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
+    <!-- html2pdf.js (legally formatted memorandum export) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+    <!--
+        LOCAL SECRETS BRIDGE (optional, gitignored)
+        Create `env.local.js` next to this file with:
+            window.__SETTLR_ENV__ = {
+                EMAILJS_PUBLIC_KEY:  "...",
+                EMAILJS_SERVICE_ID:  "...",
+                EMAILJS_TEMPLATE_ID: "..."
+            };
+        then uncomment the tag below. Left commented so the demo runs with
+        zero 404s / console noise when no local secrets file exists.
+    -->
+    <script src="env.local.js"></script>
+
+    <style>
+        input[type="range"].settlr-range {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 6px;
+            border-radius: 9999px;
+            background: #1e293b;
+            outline: none;
+            cursor: pointer;
+        }
+        input[type="range"].settlr-range::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 9999px;
+            background: #6366f1;
+            border: 2px solid #e0e7ff;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, .25);
+            transition: transform .12s ease;
+        }
+        input[type="range"].settlr-range::-webkit-slider-thumb:hover { transform: scale(1.15); }
+        input[type="range"].settlr-range::-moz-range-thumb {
+            width: 14px; height: 14px; border-radius: 9999px;
+            background: #6366f1; border: 2px solid #e0e7ff; cursor: pointer;
+        }
+        @keyframes settlr-fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+        .settlr-fade-up { animation: settlr-fade-up .32s ease both; }
+        @keyframes settlr-shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+        .settlr-shimmer {
+            background: linear-gradient(90deg, #1e293b 0%, #334155 40%, #1e293b 80%);
+            background-size: 800px 100%;
+            animation: settlr-shimmer 1.3s infinite linear;
+        }
+        .settlr-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+        .settlr-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 9999px; }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans">
+
+    <!-- Navbar -->
+    <header class="border-b border-slate-800 bg-slate-950/80 backdrop-blur sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center gap-3">
+            <div class="flex items-center space-x-3 cursor-pointer" onclick="showDashboard()">
+                <div class="bg-indigo-600 p-2 rounded-lg text-white">
+                    <i class="fa-solid fa-scale-balanced text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold tracking-tight text-white">Settlr<span class="text-indigo-400">.ai</span></h1>
+                    <p class="text-xs text-slate-400">Powered by Qwen on Alibaba Cloud</p>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+                <span id="emailjsStatusPill" title="Email delivery mode"
+                    class="hidden sm:inline-flex items-center gap-1.5 text-[10px] font-mono px-2.5 py-1 rounded-md border border-amber-500/30 bg-amber-500/10 text-amber-300">
+                    <i class="fa-solid fa-envelope-circle-check"></i> EmailJS: Simulated
+                </span>
+
+                <div id="userNav" class="hidden items-center space-x-4">
+                    <span class="text-xs text-slate-400 hidden md:inline">Logged in as: <strong id="navUserEmail" class="text-indigo-400">user@example.com</strong></span>
+                    <button onclick="logout()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-3 py-1.5 rounded-lg transition">
+                        <i class="fa-solid fa-right-from-bracket mr-1"></i> Logout
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 py-8 flex flex-col">
+
+        <!-- AUTHENTICATION PAGE -->
+        <section id="authPage" class="max-w-md w-full mx-auto my-auto bg-slate-800/80 border border-slate-700 p-8 rounded-2xl shadow-2xl space-y-6">
+            <div class="text-center space-y-2">
+                <div class="inline-flex bg-indigo-600/20 text-indigo-400 p-3 rounded-full mb-1">
+                    <i class="fa-solid fa-user-shield text-2xl"></i>
+                </div>
+                <h2 id="authTitle" class="text-2xl font-bold text-white">Welcome to Settlr.ai</h2>
+                <p class="text-xs text-slate-400">Sign in or create an account to start unbiased mediation.</p>
+            </div>
+
+            <form id="authForm" onsubmit="handleAuth(event)" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 mb-1">Email Address</label>
+                    <input type="email" id="authEmail" required placeholder="name@domain.com"
+                        class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 mb-1">Password</label>
+                    <input type="password" id="authPassword" required placeholder="••••••••"
+                        class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+                </div>
+
+                <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-3 rounded-lg shadow-lg transition">
+                    Continue to Dashboard
+                </button>
+            </form>
+
+            <div class="text-center pt-2">
+                <button type="button" onclick="toggleAuthMode()" id="authToggleBtn" class="text-xs text-indigo-400 hover:underline">
+                    Need an account? Register here
+                </button>
+            </div>
+
+            <div id="authInviteNote" class="hidden text-[11px] text-teal-300 bg-teal-500/10 border border-teal-500/25 rounded-lg px-3 py-2">
+                <i class="fa-solid fa-link mr-1"></i>
+                You arrived from a case invite (<strong id="authInviteCaseId" class="font-mono"></strong>). Sign in to submit your statement.
+            </div>
+        </section>
+
+        <!-- DASHBOARD -->
+        <section id="dashboardPage" class="hidden space-y-8">
+            <div class="border-b border-slate-800 pb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-2xl font-bold text-white">Dispute Hub</h2>
+                    <p class="text-xs text-slate-400">Select an option to start resolving or joining an active dispute case.</p>
+                </div>
+
+                <div class="flex items-center space-x-2 bg-slate-800 border border-slate-700 p-2 rounded-xl">
+                    <input type="text" id="joinCaseInput" placeholder="Enter Case ID (e.g. SETTLR-1092)"
+                        class="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white uppercase placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+                    <button onclick="joinCase()" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium px-4 py-1.5 rounded-lg transition">
+                        Join Case
+                    </button>
+                </div>
+            </div>
+
+            <!-- Party B deep-link invite banner -->
+            <div id="inviteBanner" class="hidden settlr-fade-up bg-gradient-to-r from-teal-900/50 to-slate-800/70 border border-teal-500/40 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div class="flex items-start gap-3">
+                    <div class="w-9 h-9 shrink-0 bg-teal-500/15 text-teal-300 border border-teal-500/30 rounded-lg flex items-center justify-center">
+                        <i class="fa-solid fa-envelope-open-text"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-semibold text-white">You have been named as Party B</h3>
+                        <p id="inviteBannerBody" class="text-[11px] text-slate-400 leading-relaxed mt-0.5">
+                            A case is awaiting your statement.
+                        </p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    <button onclick="dismissInvite()" class="text-[11px] text-slate-400 hover:text-white px-3 py-2 rounded-lg border border-slate-700 hover:border-slate-600 transition">
+                        Dismiss
+                    </button>
+                    <button onclick="acceptInvite()" class="text-[11px] bg-teal-600 hover:bg-teal-500 text-white font-medium px-4 py-2 rounded-lg transition">
+                        <i class="fa-solid fa-arrow-right mr-1"></i> Complete My Statement
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div onclick="startNewDispute('single')" class="bg-gradient-to-br from-indigo-900/40 to-slate-800/80 border border-indigo-500/30 hover:border-indigo-500 p-6 rounded-2xl cursor-pointer transition transform hover:-translate-y-1 shadow-xl group">
+                    <div class="w-12 h-12 bg-indigo-600/20 text-indigo-400 rounded-xl flex items-center justify-center mb-4 group-hover:bg-indigo-600 group-hover:text-white transition">
+                        <i class="fa-solid fa-plus text-xl"></i>
+                    </div>
+                    <h3 class="text-lg font-semibold text-white mb-1">Single-Device Dispute</h3>
+                    <p class="text-xs text-slate-400 leading-relaxed">Fill in statements for all involved parties directly on this device.</p>
+                </div>
+
+                <div onclick="startNewDispute('remote')" class="bg-gradient-to-br from-teal-900/40 to-slate-800/80 border border-teal-500/30 hover:border-teal-500 p-6 rounded-2xl cursor-pointer transition transform hover:-translate-y-1 shadow-xl group">
+                    <div class="w-12 h-12 bg-teal-600/20 text-teal-400 rounded-xl flex items-center justify-center mb-4 group-hover:bg-teal-600 group-hover:text-white transition">
+                        <i class="fa-solid fa-users text-xl"></i>
+                    </div>
+                    <h3 class="text-lg font-semibold text-white mb-1">Start Remote Case ID</h3>
+                    <p class="text-xs text-slate-400 leading-relaxed">Fill in your side, send the Case ID or Email invite to Party B to complete on their device.</p>
+                </div>
+
+                <div onclick="alert('Settlr.ai Rules:\n\n1. Both parties must provide truthful facts.\n2. Emotional bias is removed by AI.\n3. Proposed settlements focus on fair compromises.\n4. Decisions are saved to your account history.')" class="bg-slate-800/80 border border-slate-700/80 hover:border-slate-600 p-6 rounded-2xl cursor-pointer transition transform hover:-translate-y-1 shadow-xl group">
+                    <div class="w-12 h-12 bg-indigo-600/10 text-indigo-400 rounded-xl flex items-center justify-center mb-4 group-hover:bg-indigo-600 group-hover:text-white transition">
+                        <i class="fa-solid fa-book-open text-xl"></i>
+                    </div>
+                    <h3 class="text-lg font-semibold text-white mb-1">Mediation Guidelines</h3>
+                    <p class="text-xs text-slate-400 leading-relaxed">Review how Settlr.ai evaluates evidence and structures fair settlements.</p>
+                </div>
+            </div>
+
+            <div class="bg-slate-800/50 border border-slate-700/60 rounded-2xl p-6 shadow-xl space-y-4">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-base font-semibold text-white flex items-center">
+                        <i class="fa-solid fa-clock-rotate-left mr-2 text-indigo-400"></i> Active & Past Dispute History
+                    </h3>
+                    <div class="flex items-center gap-3">
+                        <span class="text-xs text-slate-500">Auto-saved locally</span>
+                        <button onclick="clearHistory()" class="text-[10px] text-slate-500 hover:text-rose-400 border border-slate-700 hover:border-rose-500/40 px-2 py-1 rounded transition">
+                            <i class="fa-solid fa-trash-can mr-1"></i>Clear
+                        </button>
+                    </div>
+                </div>
+
+                <div id="historyList" class="space-y-3"></div>
+            </div>
+        </section>
+
+        <!-- DISPUTE FORM & MEDIATION -->
+        <section id="disputePage" class="hidden flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8">
+            <div class="lg:col-span-5 flex flex-col space-y-6">
+                <div class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-6 shadow-xl space-y-5">
+
+                    <div class="flex items-center justify-between border-b border-slate-700/60 pb-3">
+                        <button onclick="showDashboard()" class="text-xs text-slate-400 hover:text-white transition flex items-center">
+                            <i class="fa-solid fa-arrow-left mr-1"></i> Back to Hub
+                        </button>
+                        <div id="caseIdBadge" class="hidden bg-indigo-950 text-indigo-300 border border-indigo-500/30 px-2.5 py-1 rounded-md font-mono text-xs">
+                            Case ID: <span id="currentCaseId" class="font-bold"></span>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-300 mb-2">Dispute Category</label>
+                        <select id="disputeCategory" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">
+                            <option value="deposit">🏠 Rent & Security Deposit</option>
+                            <option value="freelance">💻 Freelance & Service Work</option>
+                            <option value="loan">💸 Personal & Informal Loans</option>
+                            <option value="roommate">⚡ Roommate Utility & Expense Split</option>
+                            <option value="business">🤝 Business Partnership / Equity</option>
+                            <option value="damage">🚗 Property & Item Damage</option>
+                            <option value="sale">📦 Used Item / Marketplace Sale</option>
+                        </select>
+                    </div>
+
+                    <form id="disputeForm" class="space-y-4">
+                        <div id="partiesContainer" class="space-y-4"></div>
+
+                        <div id="addPartyBtnBox">
+                            <button type="button" onclick="addPartyField()" class="w-full border border-dashed border-slate-600 hover:border-indigo-500 text-slate-400 hover:text-indigo-400 text-xs py-2.5 rounded-lg flex items-center justify-center space-x-2 transition">
+                                <i class="fa-solid fa-user-plus"></i>
+                                <span>Add Another Party (3+ Person Dispute)</span>
+                            </button>
+                        </div>
+
+                        <!-- Optional Email Invite Field for Party B -->
+                        <div id="inviteEmailContainer" class="hidden bg-slate-900/60 border border-slate-700/80 p-3.5 rounded-xl space-y-2">
+                            <label class="block text-xs font-semibold text-teal-400 flex items-center">
+                                <i class="fa-solid fa-paper-plane mr-1.5"></i> Send Case ID Invite to Party B (Optional)
+                            </label>
+                            <input type="email" id="targetPartyEmail" placeholder="partyB@domain.com"
+                                class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500">
+                            <p class="text-[10px] text-slate-500 leading-relaxed">
+                                Delivered client-side through EmailJS with the Case ID, your email, and a pre-filled
+                                <code class="text-teal-400/80">?caseId=</code> join link. Runs in simulation mode until credentials are supplied.
+                            </p>
+                        </div>
+
+                        <!-- Evidence Upload Area -->
+                        <div>
+                            <label class="block text-xs font-medium text-slate-400 mb-1">Attach Evidence (Images, Screenshots, Receipts, PDFs)</label>
+                            <div class="border-2 border-dashed border-slate-700 hover:border-indigo-500 bg-slate-900/40 rounded-lg p-4 transition text-center cursor-pointer relative" id="dropZone">
+                                <input type="file" id="fileInput" multiple accept="image/*,.pdf,.doc,.docx" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10">
+                                <div class="flex flex-col items-center justify-center pointer-events-none">
+                                    <i class="fa-solid fa-cloud-arrow-up text-indigo-400 text-xl mb-1"></i>
+                                    <p class="text-xs text-slate-300 font-medium">Click or Drag & Drop Evidence Files</p>
+                                    <p class="text-[10px] text-slate-500">JPG, PNG, WEBP, PDF supported</p>
+                                </div>
+                            </div>
+
+                            <div id="fileList" class="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2"></div>
+
+                            <!-- Multimodal Evidence Analyzer trigger -->
+                            <button type="button" id="analyzeBtn" onclick="analyzeAttachments()" disabled
+                                class="mt-3 w-full border border-indigo-500/40 bg-indigo-500/10 hover:bg-indigo-500/20 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-indigo-500/10 text-indigo-300 text-xs font-medium py-2.5 rounded-lg flex items-center justify-center space-x-2 transition">
+                                <i class="fa-solid fa-magnifying-glass-chart"></i>
+                                <span id="analyzeBtnText">Analyze Attachments</span>
+                            </button>
+
+                            <!-- Mock OCR / Vision breakdown -->
+                            <div id="evidenceAnalysisBox" class="hidden mt-3 bg-slate-900/70 border border-indigo-500/30 rounded-xl overflow-hidden"></div>
+                        </div>
+
+                        <button type="submit" id="submitBtn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-3 px-4 rounded-lg flex items-center justify-center space-x-2 shadow-lg shadow-indigo-600/30 transition">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i>
+                            <span id="submitBtnText">Generate Neutral Mediation</span>
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Right Column -->
+            <div class="lg:col-span-7 flex flex-col">
+                <div id="emptyState" class="h-full bg-slate-800/30 border border-dashed border-slate-700/80 rounded-2xl p-12 flex flex-col items-center justify-center text-center">
+                    <div class="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center text-slate-500 mb-4">
+                        <i class="fa-solid fa-scale-balanced text-2xl"></i>
+                    </div>
+                    <h3 class="text-base font-medium text-slate-300 mb-1">Awaiting Case Submission</h3>
+                    <p class="text-xs text-slate-500 max-w-sm">Provide statements for all parties to analyze facts and construct a neutral resolution.</p>
+                </div>
+
+                <div id="remoteShareState" class="hidden h-full bg-slate-800/60 border border-teal-500/30 rounded-2xl p-8 flex flex-col items-center justify-center text-center space-y-6">
+                    <div class="w-16 h-16 bg-teal-500/10 text-teal-400 border border-teal-500/30 rounded-full flex items-center justify-center">
+                        <i class="fa-solid fa-share-nodes text-2xl"></i>
+                    </div>
+                    <div class="space-y-2 max-w-md">
+                        <h3 class="text-lg font-bold text-white">Case ID Successfully Created!</h3>
+                        <p class="text-xs text-slate-400 leading-relaxed">Party A's statement and evidence have been securely locked. Share this Case ID with Party B so they can input their statement on their own device.</p>
+                    </div>
+
+                    <div class="bg-slate-900 border border-slate-700 p-4 rounded-xl flex items-center justify-between w-full max-w-sm">
+                        <div class="text-left">
+                            <span class="text-[10px] text-slate-500 block uppercase font-mono">Unique Case ID</span>
+                            <span id="createdCaseIdText" class="text-lg font-mono font-bold text-teal-400"></span>
+                        </div>
+                        <button onclick="copyCaseId()" class="bg-teal-600 hover:bg-teal-500 text-white text-xs font-medium px-3 py-2 rounded-lg transition flex items-center space-x-1.5">
+                            <i class="fa-regular fa-copy"></i>
+                            <span>Copy ID</span>
+                        </button>
+                    </div>
+
+                    <button onclick="copyInviteLink()" class="text-xs text-slate-400 hover:text-teal-300 transition underline underline-offset-4">
+                        <i class="fa-solid fa-link mr-1"></i> Copy pre-filled invite link
+                    </button>
+
+                    <!-- EmailJS delivery status -->
+                    <div id="emailStatusBox" class="hidden w-full max-w-sm text-left"></div>
+
+                    <button onclick="showDashboard()" class="text-xs text-slate-400 hover:text-white transition underline">
+                        Return to Dashboard
+                    </button>
+                </div>
+
+                <div id="loadingState" class="hidden h-full bg-slate-800/40 border border-slate-700/60 rounded-2xl p-12 flex flex-col items-center justify-center text-center">
+                    <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-500 mb-4"></div>
+                    <h3 class="text-sm font-medium text-slate-200">Processing via Qwen Model Studio...</h3>
+                    <p class="text-xs text-slate-400 mt-1">Filtering subjective bias and extracting agreed facts...</p>
+                </div>
+
+                <div id="outputState" class="hidden space-y-6">
+                    <div class="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-6 shadow-xl space-y-6">
+                        <div class="flex items-center justify-between border-b border-slate-700/60 pb-4">
+                            <div class="flex items-center space-x-2">
+                                <span class="h-2.5 w-2.5 rounded-full bg-emerald-400"></span>
+                                <h3 class="font-semibold text-white text-sm">Settlr.ai Neutral Mediation Analysis</h3>
+                            </div>
+                            <span class="text-[10px] bg-indigo-950 text-indigo-300 border border-indigo-500/30 font-mono px-2 py-0.5 rounded">Qwen Engine Active</span>
+                        </div>
+
+                        <div>
+                            <h4 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">1. Neutral Case Summary</h4>
+                            <p id="resSummary" class="text-sm text-slate-300 leading-relaxed bg-slate-900/50 p-3 rounded-lg border border-slate-800"></p>
+                        </div>
+
+                        <!-- Evidence analysis mirrored into the resolution -->
+                        <div id="resEvidenceWrap" class="hidden">
+                            <h4 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center">
+                                <i class="fa-solid fa-eye mr-2 text-indigo-400"></i> 2. Multimodal Evidence Findings
+                                <span class="ml-2 text-[9px] font-mono bg-indigo-950 text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded normal-case tracking-normal">Qwen-VL OCR · Simulated</span>
+                            </h4>
+                            <div id="resEvidence" class="space-y-2"></div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="bg-slate-900/50 p-4 rounded-lg border border-emerald-500/20">
+                                <h4 class="text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-2 flex items-center">
+                                    <i class="fa-solid fa-circle-check mr-2"></i> Points of Agreement
+                                </h4>
+                                <ul id="resAgreed" class="text-xs text-slate-300 space-y-1.5 list-disc list-inside"></ul>
+                            </div>
+                            <div class="bg-slate-900/50 p-4 rounded-lg border border-rose-500/20">
+                                <h4 class="text-xs font-semibold text-rose-400 uppercase tracking-wider mb-2 flex items-center">
+                                    <i class="fa-solid fa-circle-xmark mr-2"></i> Points of Dispute
+                                </h4>
+                                <ul id="resDisputed" class="text-xs text-slate-300 space-y-1.5 list-disc list-inside"></ul>
+                            </div>
+                        </div>
+
+                        <div class="bg-indigo-950/30 border border-indigo-500/30 p-4 rounded-lg">
+                            <h4 class="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-2 flex items-center">
+                                <i class="fa-solid fa-handshake mr-2"></i> Proposed Settlement
+                            </h4>
+                            <p id="resSettlement" class="text-sm font-medium text-slate-100 leading-relaxed"></p>
+                        </div>
+
+                        <!-- Financial Settlement Splitter -->
+                        <div id="financeSection" class="hidden bg-slate-900/60 border border-slate-700 rounded-xl p-4 space-y-5">
+                            <div class="flex items-center justify-between gap-3">
+                                <h4 class="text-xs font-semibold text-slate-200 uppercase tracking-wider flex items-center">
+                                    <i class="fa-solid fa-chart-pie mr-2 text-emerald-400"></i> Financial Settlement Splitter
+                                </h4>
+                                <button onclick="resetShares()" class="text-[10px] text-slate-500 hover:text-indigo-300 border border-slate-700 hover:border-indigo-500/40 px-2 py-1 rounded transition">
+                                    <i class="fa-solid fa-rotate-left mr-1"></i>Reset to AI recommendation
+                                </button>
+                            </div>
+
+                            <div class="overflow-hidden rounded-lg border border-slate-700/80">
+                                <table class="w-full text-xs">
+                                    <tbody id="financeTableBody" class="divide-y divide-slate-800"></tbody>
+                                </table>
+                            </div>
+
+                            <div>
+                                <div class="flex items-center justify-between mb-1.5">
+                                    <span class="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Recommended Liability Split</span>
+                                    <span id="splitTotalBadge" class="text-[10px] font-mono text-slate-400"></span>
+                                </div>
+                                <div id="splitBar" class="flex h-4 w-full rounded-full overflow-hidden bg-slate-800 border border-slate-700"></div>
+                                <div id="splitLegend" class="mt-2 flex flex-wrap gap-x-4 gap-y-1"></div>
+                            </div>
+
+                            <div id="shareSliders" class="space-y-3"></div>
+
+                            <div id="netOwedCallout" class="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3"></div>
+                        </div>
+
+                        <!-- Sandbox Payment Gateway -->
+                        <div id="settleSection" class="hidden bg-gradient-to-br from-slate-900/80 to-slate-800/60 border border-slate-700 rounded-xl p-4 space-y-4">
+                            <div class="flex items-center justify-between gap-3">
+                                <h4 class="text-xs font-semibold text-slate-200 uppercase tracking-wider flex items-center">
+                                    <i class="fa-solid fa-vault mr-2 text-indigo-400"></i> Settle Now — Escrow Gateway
+                                </h4>
+                                <span class="text-[9px] font-mono bg-amber-500/10 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded uppercase">Sandbox</span>
+                            </div>
+
+                            <div id="settleBody"></div>
+                        </div>
+
+                        <div class="flex flex-wrap gap-3 pt-2">
+                            <button onclick="copyResolution()" class="flex-1 bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium py-2.5 px-4 rounded-lg flex items-center justify-center space-x-2 transition">
+                                <i class="fa-regular fa-copy"></i>
+                                <span>Copy Resolution</span>
+                            </button>
+                            <button onclick="downloadMemorandum()" id="pdfBtn" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium py-2.5 px-4 rounded-lg flex items-center justify-center space-x-2 transition shadow-lg shadow-indigo-600/20">
+                                <i class="fa-solid fa-file-pdf"></i>
+                                <span id="pdfBtnText">Download Memorandum</span>
+                            </button>
+                        </div>
+                        <p class="text-[10px] text-slate-500 leading-relaxed text-center">
+                            Prototype output. Settlr.ai provides structured mediation assistance and does not constitute legal advice.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Sandbox Checkout Modal -->
+    <div id="paymentModal" class="hidden fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" onclick="closePaymentModal()"></div>
+        <div class="relative w-full max-w-md bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden settlr-fade-up">
+            <div class="flex items-center justify-between px-5 py-3.5 border-b border-slate-700 bg-slate-900/60">
+                <div class="flex items-center gap-2">
+                    <i id="payModalIcon" class="fa-brands fa-stripe text-indigo-400"></i>
+                    <h3 id="payModalTitle" class="text-sm font-semibold text-white">Checkout</h3>
+                    <span class="text-[9px] font-mono bg-amber-500/10 text-amber-300 border border-amber-500/30 px-1.5 py-0.5 rounded uppercase">Test Mode</span>
+                </div>
+                <button onclick="closePaymentModal()" class="text-slate-500 hover:text-white transition">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div id="payModalBody" class="p-5"></div>
+        </div>
+    </div>
+
+    <!-- Toasts -->
+    <div id="toastStack" class="fixed bottom-4 right-4 z-[200] space-y-2 w-[min(92vw,22rem)]"></div>
+
+    <script>
+    const SETTLR_ENV = Object.assign({
+        EMAILJS_PUBLIC_KEY:  'YOUR_PUBLIC_KEY_HERE',
+        EMAILJS_SERVICE_ID:  'YOUR_SERVICE_ID_HERE',
+        EMAILJS_TEMPLATE_ID: 'YOUR_TEMPLATE_ID_HERE',
+        EMAILJS_FROM_NAME:   'Settlr.ai Mediation',
+        APP_URL:             ''
+    }, window.__SETTLR_ENV__ || {});
+
+    const isPlaceholder = (v) => !v || /^YOUR_.*_HERE$/.test(String(v).trim());
+    const emailjsConfigured = () =>
+        !isPlaceholder(SETTLR_ENV.EMAILJS_PUBLIC_KEY) &&
+        !isPlaceholder(SETTLR_ENV.EMAILJS_SERVICE_ID) &&
+        !isPlaceholder(SETTLR_ENV.EMAILJS_TEMPLATE_ID) &&
+        typeof window.emailjs !== 'undefined';
+
+    let currentUser = null;
+    let partyCount = 0;
+    let attachedFiles = [];
+    let activeCaseId = null;
+    let activeMode = 'single';
+    let currentResult = null;
+    let evidenceAnalysis = null;
+    let financeState = null;
+    let pendingInvite = null;
+    let disputesDB = JSON.parse(localStorage.getItem('settlr_disputes') || '{}');
+
+    const PARTY_TINTS = [
+        { bar: '#6366f1', text: 'text-indigo-400', chip: 'bg-indigo-500/15 border-indigo-500/30 text-indigo-300' },
+        { bar: '#14b8a6', text: 'text-teal-400',   chip: 'bg-teal-500/15 border-teal-500/30 text-teal-300' },
+        { bar: '#f59e0b', text: 'text-amber-400',  chip: 'bg-amber-500/15 border-amber-500/30 text-amber-300' },
+        { bar: '#f43f5e', text: 'text-rose-400',   chip: 'bg-rose-500/15 border-rose-500/30 text-rose-300' },
+        { bar: '#a855f7', text: 'text-purple-400', chip: 'bg-purple-500/15 border-purple-500/30 text-purple-300' },
+        { bar: '#06b6d4', text: 'text-cyan-400',   chip: 'bg-cyan-500/15 border-cyan-500/30 text-cyan-300' }
+    ];
+    const tintFor = (i) => PARTY_TINTS[i % PARTY_TINTS.length];
+    const $ = (id) => document.getElementById(id);
+
+    function escapeHtml(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, (c) => (
+            { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+        ));
+    }
+    function sanitizeCaseId(raw) {
+        const id = String(raw || '').trim().toUpperCase().replace(/[^A-Z0-9\-]/g, '');
+        return /^SETTLR-[A-Z0-9]{1,12}$/.test(id) ? id : '';
+    }
+    function sanitizeEmail(raw) {
+        const e = String(raw || '').trim();
+        return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e) && e.length <= 254 ? e : '';
+    }
+
+    function copyText(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+            return navigator.clipboard.writeText(text);
+        }
+        return new Promise((resolve, reject) => {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.setAttribute('readonly', '');
+            ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;';
+            document.body.appendChild(ta);
+            ta.select();
+            ta.setSelectionRange(0, text.length);
+            let ok = false;
+            try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
+            ta.remove();
+            ok ? resolve() : reject(new Error('Copy command unavailable'));
+        });
+    }
+
+    function toast(message, type = 'info', ms = 3800) {
+        const styles = {
+            info:    'border-slate-600 bg-slate-800 text-slate-100',
+            success: 'border-emerald-500/40 bg-emerald-950/90 text-emerald-100',
+            warn:    'border-amber-500/40 bg-amber-950/90 text-amber-100',
+            error:   'border-rose-500/40 bg-rose-950/90 text-rose-100'
+        };
+        const icons = {
+            info: 'fa-circle-info text-slate-400',
+            success: 'fa-circle-check text-emerald-400',
+            warn: 'fa-triangle-exclamation text-amber-400',
+            error: 'fa-circle-xmark text-rose-400'
+        };
+        const el = document.createElement('div');
+        el.className = `settlr-fade-up flex items-start gap-2.5 border ${styles[type] || styles.info} px-3.5 py-2.5 rounded-xl shadow-2xl text-xs`;
+        el.innerHTML = `<i class="fa-solid ${icons[type] || icons.info} mt-0.5"></i><span class="leading-relaxed">${escapeHtml(message)}</span>`;
+        $('toastStack').appendChild(el);
+        setTimeout(() => {
+            el.style.transition = 'opacity .3s, transform .3s';
+            el.style.opacity = '0';
+            el.style.transform = 'translateY(6px)';
+            setTimeout(() => el.remove(), 320);
+        }, ms);
+    }
+
+    const CURRENCY_SYMBOLS = { usd: '$', pkr: '₨', inr: '₹', eur: '€', gbp: '£', aed: 'د.إ' };
+    let detectedCurrency = '$';
+
+    const MONEY_RE = new RegExp(
+        '(?:\\$|US\\$|USD|Rs\\.?|PKR|INR|€|£|AED|SAR|₨|₹)\\s*([0-9][0-9,]*(?:\\.[0-9]{1,2})?)' +
+        '|([0-9][0-9,]*(?:\\.[0-9]{1,2})?)\\s*(?:USD|US\\s*dollars?|dollars?|rupees?|paise|euros?|pounds?|dirhams?|riyals?)',
+        'gi'
+    );
+    const DATE_RE = new RegExp(
+        '\\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\.?\\s+[0-9]{1,2}(?:st|nd|rd|th)?(?:,?\\s+[0-9]{4})?\\b' +
+        '|\\b[0-9]{4}-[0-9]{2}-[0-9]{2}\\b' +
+        '|\\b[0-9]{1,2}[/-][0-9]{1,2}(?:[/-][0-9]{2,4})?\\b',
+        'gi'
+    );
+    const DEDUCTION_RE = /\b(deduct\w*|expense\w*|repair\w*|utilit\w*|bills?|offset\w*|refund\w*|reimburs\w*|discount\w*|return(?:ed|s)?|cleaning|damage cost|already paid|partially paid|paid back|repaid)\b/i;
+
+    function extractMoney(text) {
+        const out = [];
+        let m;
+        MONEY_RE.lastIndex = 0;
+        while ((m = MONEY_RE.exec(String(text || ''))) !== null) {
+            const raw = m[1] || m[2];
+            const value = parseFloat(String(raw).replace(/,/g, ''));
+            if (!isNaN(value) && value > 0 && value < 1e12) out.push({ raw: m[0].trim(), value });
+            if (m.index === MONEY_RE.lastIndex) MONEY_RE.lastIndex++;
+        }
+        return out;
+    }
+    function detectCurrency(text) {
+        const t = String(text || '');
+        if (/\b(PKR|Rs\.?|₨)\b/i.test(t)) return CURRENCY_SYMBOLS.pkr;
+        if (/\b(INR|₹)\b/i.test(t)) return CURRENCY_SYMBOLS.inr;
+        if (/€/.test(t)) return CURRENCY_SYMBOLS.eur;
+        if (/£/.test(t)) return CURRENCY_SYMBOLS.gbp;
+        if (/\bAED\b|dirham/i.test(t)) return 'AED ';
+        return CURRENCY_SYMBOLS.usd;
+    }
+    function extractDates(text) {
+        DATE_RE.lastIndex = 0;
+        const found = String(text || '').match(DATE_RE) || [];
+        return Array.from(new Set(found.map(d => d.trim()))).slice(0, 6);
+    }
+    function fmtMoney(n) {
+        const v = Math.max(0, Number(n) || 0);
+        return detectedCurrency + v.toLocaleString('en-US', { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 });
+    }
+
+    const fileInput = $('fileInput');
+    const fileList = $('fileList');
+
+    fileInput.addEventListener('change', (e) => handleFiles(Array.from(e.target.files)));
+
+    const dropZone = $('dropZone');
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, preventDefaults, false);
+    });
+    ['dragenter', 'dragover'].forEach(ev => dropZone.addEventListener(ev, () => dropZone.classList.add('border-indigo-500')));
+    ['dragleave', 'drop'].forEach(ev => dropZone.addEventListener(ev, () => dropZone.classList.remove('border-indigo-500')));
+
+    function preventDefaults(e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+
+    dropZone.addEventListener('drop', (e) => {
+        handleFiles(Array.from(e.dataTransfer.files));
+    });
+
+    function handleFiles(files) {
+        files.forEach(file => {
+            if (!attachedFiles.some(f => f.name === file.name && f.size === file.size)) {
+                attachedFiles.push(file);
+            }
+        });
+        renderFileList();
+    }
+
+    function renderFileList() {
+        fileList.innerHTML = '';
+        attachedFiles.forEach((file, index) => {
+            const isImage = file.type.startsWith('image/');
+            const card = document.createElement('div');
+            card.className = 'relative group bg-slate-900 border border-slate-700 rounded-lg p-2 flex flex-col items-center text-center shadow-sm';
+
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'absolute -top-1.5 -right-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] shadow-md transition z-20';
+            removeBtn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+            removeBtn.onclick = (e) => {
+                e.stopPropagation();
+                removeFile(index);
+            };
+
+            let previewHtml = '';
+            if (isImage) {
+                previewHtml = `<img src="${URL.createObjectURL(file)}" alt="" class="w-full h-16 object-cover rounded mb-1.5 border border-slate-800">`;
+            } else {
+                previewHtml = `<div class="w-full h-16 bg-slate-800 rounded flex items-center justify-center mb-1.5"><i class="fa-solid fa-file-pdf text-teal-400 text-xl"></i></div>`;
+            }
+
+            card.innerHTML = `
+                ${previewHtml}
+                <span class="text-[10px] text-slate-200 font-medium truncate w-full px-1" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>
+                <span class="text-[9px] text-slate-500">${Math.round(file.size / 1024)} KB</span>
+            `;
+            card.appendChild(removeBtn);
+            fileList.appendChild(card);
+        });
+
+        const btn = $('analyzeBtn');
+        btn.disabled = attachedFiles.length === 0;
+        $('analyzeBtnText').innerText = attachedFiles.length
+            ? `Analyze ${attachedFiles.length} Attachment${attachedFiles.length > 1 ? 's' : ''}`
+            : 'Analyze Attachments';
+        if (!attachedFiles.length) {
+            $('evidenceAnalysisBox').classList.add('hidden');
+            evidenceAnalysis = null;
+        }
+    }
+
+    function removeFile(index) {
+        attachedFiles.splice(index, 1);
+        renderFileList();
+    }
+
+    const OCR_PROFILES = [
+        { test: /receipt|invoice|bill|statement/i,        kind: 'Receipt / Invoice',               icon: 'fa-receipt',             tint: 'emerald' },
+        { test: /chat|whatsapp|message|sms|thread|mail/i, kind: 'Chat / Message Log',              icon: 'fa-comments',            tint: 'sky' },
+        { test: /transfer|bank|payment|txn|transaction|screenshot|screen|confirm/i, kind: 'Payment Confirmation Screenshot', icon: 'fa-money-bill-transfer', tint: 'indigo' },
+        { test: /contract|agreement|lease|terms|deed/i,   kind: 'Contract / Agreement',            icon: 'fa-file-signature',      tint: 'amber' },
+        { test: /damage|photo|img|image|pic|proof/i,      kind: 'Photographic Evidence',           icon: 'fa-camera',              tint: 'rose' }
+    ];
+
+    function seededRandom(seedStr) {
+        let h = 2166136261;
+        for (let i = 0; i < seedStr.length; i++) {
+            h ^= seedStr.charCodeAt(i);
+            h = Math.imul(h, 16777619);
+        }
+        return () => {
+            h = (Math.imul(h, 1103515245) + 12345) & 0x7fffffff;
+            return h / 0x7fffffff;
+        };
+    }
+
+    function classifyFile(file) {
+        const profile = OCR_PROFILES.find(p => p.test.test(file.name));
+        if (profile) return profile;
+        if (file.type.startsWith('image/')) return OCR_PROFILES[4];
+        if (/pdf|word|text/.test(file.type) || /\.(pdf|docx?|txt)$/i.test(file.name)) return OCR_PROFILES[3];
+        return OCR_PROFILES[2];
+    }
+
+    function collectStatementText() {
+        return Array.from(document.querySelectorAll('.party-input')).map(i => i.value).join('\n');
+    }
+
+    function buildEvidenceAnalysis() {
+        const statementText = collectStatementText();
+        const category = $('disputeCategory').value;
+        const money = extractMoney(statementText);
+        const dates = extractDates(statementText);
+        detectedCurrency = detectCurrency(statementText);
+
+        const rnd = seededRandom(activeCaseId + attachedFiles.length);
+        const items = attachedFiles.map((file, i) => {
+            const profile = classifyFile(file);
+            const r = seededRandom(file.name + file.size);
+            const amount = money[i % Math.max(1, money.length)] || money[0];
+            const date = dates[i % Math.max(1, dates.length)] || dates[0];
+            const confidence = Math.round((0.83 + r() * 0.15) * 100);
+
+            const fields = [];
+            if (amount) fields.push({ label: 'Amount', value: fmtMoney(amount.value) });
+            if (date) fields.push({ label: 'Date', value: date });
+            if (/Receipt|Payment/.test(profile.kind)) {
+                fields.push({ label: 'Method', value: ['Bank Transfer', 'Card Payment', 'Mobile Wallet', 'Cash Deposit'][Math.floor(r() * 4)] });
+                fields.push({ label: 'Reference', value: 'TXN-' + Math.floor(100000 + r() * 899999) });
+            } else if (/Chat/.test(profile.kind)) {
+                fields.push({ label: 'Participants', value: '2 detected' });
+                fields.push({ label: 'Key Phrase', value: '"I will return the remaining amount"' });
+            } else if (/Contract/.test(profile.kind)) {
+                fields.push({ label: 'Clauses Found', value: String(3 + Math.floor(r() * 6)) });
+                fields.push({ label: 'Signatures', value: r() > 0.4 ? 'Both parties' : 'Partial (1 of 2)'});
+            } else {
+                fields.push({ label: 'Objects', value: ['Currency note', 'Device screen', 'Damaged item', 'Signed paper'][Math.floor(r() * 4)] });
+            }
+            fields.push({ label: 'Legibility', value: confidence > 92 ? 'High' : confidence > 86 ? 'Moderate' : 'Low — manual review advised' });
+
+            const headline = amount
+                ? `Extracted: ${fmtMoney(amount.value)} transaction${date ? ` on ${date}` : ''} via ${profile.kind.toLowerCase()}`
+                : `${profile.kind} parsed — ${fields.length} metadata attributes recovered`;
+
+            return { name: file.name, kind: profile.kind, icon: profile.icon, tint: profile.tint, confidence, fields, headline, bytes: file.size };
+        });
+
+        return {
+            items,
+            amounts: money.map(m => m.value),
+            dates,
+            category,
+            avgConfidence: items.length ? Math.round(items.reduce((s, it) => s + it.confidence, 0) / items.length) : 0,
+            analyzedAt: new Date().toISOString()
+        };
+    }
+
+    function renderEvidenceBox(analysis, targetId) {
+        const box = $(targetId);
+        if (!analysis || !analysis.items.length) { box.classList.add('hidden'); return; }
+
+        const tintMap = {
+            emerald: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+            sky:     'border-sky-500/30 bg-sky-500/10 text-sky-300',
+            indigo:  'border-indigo-500/30 bg-indigo-500/10 text-indigo-300',
+            amber:   'border-amber-500/30 bg-amber-500/10 text-amber-300',
+            rose:    'border-rose-500/30 bg-rose-500/10 text-rose-300'
+        };
+
+        const cards = analysis.items.map(it => `
+            <div class="bg-slate-900/80 border border-slate-700/70 rounded-lg p-3 space-y-2">
+                <div class="flex items-start justify-between gap-2">
+                    <div class="flex items-center gap-2 min-w-0">
+                        <span class="w-7 h-7 shrink-0 rounded-md border ${tintMap[it.tint] || tintMap.indigo} flex items-center justify-center">
+                            <i class="fa-solid ${escapeHtml(it.icon)} text-[11px]"></i>
+                        </span>
+                        <div class="min-w-0">
+                            <p class="text-[11px] font-semibold text-slate-100 truncate" title="${escapeHtml(it.name)}">${escapeHtml(it.name)}</p>
+                            <p class="text-[9px] text-slate-500 uppercase tracking-wide">${escapeHtml(it.kind)} · ${Math.round(it.bytes / 1024)} KB</p>
+                        </div>
+                    </div>
+                    <span class="shrink-0 text-[9px] font-mono px-1.5 py-0.5 rounded border ${it.confidence > 90 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/30 bg-amber-500/10 text-amber-300'}">
+                        ${it.confidence}% conf.
+                    </span>
+                </div>
+                <p class="text-[11px] text-indigo-200 bg-indigo-950/40 border border-indigo-500/20 rounded px-2 py-1.5 leading-relaxed">
+                    <i class="fa-solid fa-quote-left text-[8px] mr-1 opacity-60"></i>${escapeHtml(it.headline)}
+                </p>
+                <div class="flex flex-wrap gap-1">
+                    ${it.fields.map(f => `<span class="text-[9px] bg-slate-800 border border-slate-700 text-slate-400 px-1.5 py-0.5 rounded"><strong class="text-slate-300">${escapeHtml(f.label)}:</strong> ${escapeHtml(f.value)}</span>`).join('')}
+                </div>
+            </div>
+        `).join('');
+
+        box.innerHTML = `
+            <div class="flex items-center justify-between px-3 py-2 bg-slate-950/60 border-b border-slate-700/60">
+                <span class="text-[10px] font-semibold uppercase tracking-wider text-slate-300 flex items-center">
+                    <i class="fa-solid fa-eye mr-1.5 text-indigo-400"></i> Vision / OCR Extraction
+                </span>
+                <span class="text-[9px] font-mono text-slate-500">${analysis.items.length} file(s) · avg ${analysis.avgConfidence}%</span>
+            </div>
+            <div class="p-3 space-y-2 max-h-72 overflow-y-auto settlr-scroll">${cards}</div>
+        `;
+        box.classList.remove('hidden');
+    }
+
+    async function analyzeAttachments(silent = false) {
+        if (!attachedFiles.length) {
+            if (!silent) toast('Attach at least one evidence file to analyze.', 'warn');
+            return null;
+        }
+        const btn = $('analyzeBtn');
+        const label = $('analyzeBtnText');
+        btn.disabled = true;
+        label.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i>Analyzing with Qwen-VL...';
+
+        const box = $('evidenceAnalysisBox');
+        box.classList.remove('hidden');
+        box.innerHTML = `<div class="p-3 space-y-2">${'<div class="settlr-shimmer h-16 rounded-lg"></div>'.repeat(Math.min(3, attachedFiles.length))}</div>`;
+
+        await new Promise(r => setTimeout(r, 1100 + attachedFiles.length * 250));
+
+        evidenceAnalysis = buildEvidenceAnalysis();
+        renderEvidenceBox(evidenceAnalysis, 'evidenceAnalysisBox');
+
+        btn.disabled = false;
+        label.innerText = `Re-analyze ${attachedFiles.length} Attachment${attachedFiles.length > 1 ? 's' : ''}`;
+
+        if (!silent) {
+            const amt = evidenceAnalysis.amounts.length;
+            toast(`Evidence parsed: ${attachedFiles.length} file(s), ${amt} monetary value(s), ${evidenceAnalysis.dates.length} date(s) recovered.`, 'success');
+        }
+        return evidenceAnalysis;
+    }
+
+    function appBaseUrl() {
+        const configured = String(SETTLR_ENV.APP_URL || '').trim();
+        if (configured && !isPlaceholder(configured)) return configured.split('?')[0].split('#')[0];
+        return location.href.split('?')[0].split('#')[0];
+    }
+
+    function buildInviteLink(caseId) {
+        return `${appBaseUrl()}?caseId=${encodeURIComponent(caseId)}`;
+    }
+
+    function refreshEmailStatusPill() {
+        const pill = $('emailjsStatusPill');
+        const live = emailjsConfigured();
+        pill.className = `hidden sm:inline-flex items-center gap-1.5 text-[10px] font-mono px-2.5 py-1 rounded-md border ${
+            live
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+        }`;
+        pill.innerHTML = `<i class="fa-solid ${live ? 'fa-envelope-circle-check' : 'fa-flask'}"></i> EmailJS: ${live ? 'Live' : 'Simulated'}`;
+    }
+
+    function renderEmailStatus(state, targetEmail, detail) {
+        const box = $('emailStatusBox');
+        box.classList.remove('hidden');
+        const map = {
+            sending:   { cls: 'border-sky-500/30 bg-sky-500/10 text-sky-200',      icon: 'fa-spinner fa-spin' },
+            sent:      { cls: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200', icon: 'fa-paper-plane' },
+            simulated: { cls: 'border-amber-500/30 bg-amber-500/10 text-amber-200', icon: 'fa-flask' },
+            error:     { cls: 'border-rose-500/30 bg-rose-500/10 text-rose-200',   icon: 'fa-circle-exclamation' }
+        };
+        const s = map[state] || map.simulated;
+        const titles = {
+            sending: 'Dispatching invite…',
+            sent: `Invite delivered to ${escapeHtml(targetEmail)}`,
+            simulated: `Invite simulated for ${escapeHtml(targetEmail)}`,
+            error: `Delivery failed for ${escapeHtml(targetEmail)}`
+        };
+        box.innerHTML = `
+            <div class="border ${s.cls} rounded-lg px-3 py-2.5 text-left space-y-1">
+                <p class="text-[11px] font-semibold flex items-center gap-1.5">
+                    <i class="fa-solid ${s.icon}"></i> ${titles[state]}
+                </p>
+                <p class="text-[10px] opacity-80 leading-relaxed">${escapeHtml(detail || '')}</p>
+                ${state === 'error' ? `<button onclick="retryInviteEmail()" class="mt-1 text-[10px] underline hover:no-underline font-medium">Retry delivery</button>` : ''}
+            </div>
+        `;
+    }
+
+    async function sendPartyBInvite(targetEmail, caseId, partyAEmail) {
+        const link = buildInviteLink(caseId);
+
+        const templateParams = {
+            to_email:      targetEmail,
+            to_name:       'Party B',
+            from_email:    partyAEmail || currentUser || 'unknown@settlr.ai',
+            from_name:     SETTLR_ENV.EMAILJS_FROM_NAME,
+            case_id:       caseId,
+            invite_link:   link,
+            reply_to:      partyAEmail || currentUser || '',
+            subject:       `Settlr.ai — You have been named in case ${caseId}`,
+            message:       `${partyAEmail || 'Party A'} opened neutral mediation case ${caseId} on Settlr.ai and listed you as Party B.\n\nCase ID: ${caseId}\nOpened by: ${partyAEmail || 'Party A'}\n\nOpen your pre-filled case here: ${link}\n\nSettlr.ai removes emotional bias and proposes a fair, evidence-based settlement. Your statement is locked only after you submit it.`
+        };
+
+        if (!emailjsConfigured()) {
+            console.info('[Settlr.ai] EmailJS simulation — template payload:', templateParams);
+            return { status: 'simulated', detail: 'EmailJS credentials not configured, so the payload was logged to the browser console instead of sent. Add them via env.local.js to deliver for real.' };
+        }
+
+        try {
+            renderEmailStatus('sending', targetEmail, 'Contacting EmailJS…');
+            if (!window.__emailjsInited) {
+                window.emailjs.init(SETTLR_ENV.EMAILJS_PUBLIC_KEY);
+                window.__emailjsInited = true;
+            }
+            await window.emailjs.send(
+                SETTLR_ENV.EMAILJS_SERVICE_ID,
+                SETTLR_ENV.EMAILJS_TEMPLATE_ID,
+                templateParams
+            );
+            return { status: 'sent', detail: `Delivered with Case ID, Party A's address and a pre-filled join link: ${link}` };
+        } catch (err) {
+            console.error('[Settlr.ai] EmailJS error:', err);
+            return { status: 'error', detail: (err && (err.text || err.message)) || 'EmailJS rejected the request. Check SERVICE_ID / TEMPLATE_ID / domain allow-list.' };
+        }
+    }
+
+    let lastInviteArgs = null;
+    async function retryInviteEmail() {
+        if (!lastInviteArgs) return;
+        const res = await sendPartyBInvite(...lastInviteArgs);
+        renderEmailStatus(res.status, lastInviteArgs[0], res.detail);
+    }
+
+    function handleIncomingCaseLink() {
+        const params = new URLSearchParams(location.search);
+        const caseId = sanitizeCaseId(params.get('caseId') || params.get('case') || '');
+        if (!caseId) return;
+
+        const from = sanitizeEmail(params.get('from') || '');
+        pendingInvite = { caseId, from };
+
+        $('joinCaseInput').value = caseId;
+        $('authInviteNote').classList.remove('hidden');
+        $('authInviteCaseId').innerText = caseId;
+
+        try { history.replaceState(null, '', location.pathname); } catch (_) { }
+    }
+
+    function showInviteBanner() {
+        if (!pendingInvite) return;
+        const body = $('inviteBannerBody');
+        if (!body) return;
+        body.innerHTML =
+            `Case <span class="font-mono text-teal-300">${escapeHtml(pendingInvite.caseId)}</span> is awaiting your statement` +
+            (pendingInvite.from ? `, opened by <span class="text-slate-300">${escapeHtml(pendingInvite.from)}</span>.` : '.');
+        $('inviteBanner').classList.remove('hidden');
+    }
+    function dismissInvite() {
+        pendingInvite = null;
+        $('inviteBanner').classList.add('hidden');
+        $('authInviteNote').classList.add('hidden');
+    }
+    function acceptInvite() {
+        if (!pendingInvite) return;
+        $('joinCaseInput').value = pendingInvite.caseId;
+        const invite = pendingInvite;
+        dismissInvite();
+        joinCase(invite.caseId, invite.from);
+    }
+
+    function showPage(pageId) {
+        ['authPage', 'dashboardPage', 'disputePage'].forEach(id => $(id).classList.add('hidden'));
+        $(pageId).classList.remove('hidden');
+    }
+
+    function handleAuth(e) {
+        e.preventDefault();
+        const email = sanitizeEmail($('authEmail').value);
+        if (!email) return toast('Enter a valid email address.', 'error');
+        currentUser = email;
+        $('navUserEmail').innerText = email;
+        $('userNav').classList.remove('hidden');
+        $('userNav').classList.add('flex');
+        $('authInviteNote').classList.add('hidden');
+        showDashboard();
+        if (pendingInvite) {
+            toast(`Case ${pendingInvite.caseId} invite detected — complete your statement to continue.`, 'info', 5200);
+        }
+    }
+
+    function logout() {
+        currentUser = null;
+        $('userNav').classList.add('hidden');
+        $('userNav').classList.remove('flex');
+        showPage('authPage');
+    }
+
+    function toggleAuthMode() {
+        const title = $('authTitle');
+        const btn = $('authToggleBtn');
+        if (title.innerText.includes('Welcome')) {
+            title.innerText = 'Register New Account';
+            btn.innerText = 'Already have an account? Login';
+        } else {
+            title.innerText = 'Welcome to Settlr.ai';
+            btn.innerText = 'Need an account? Register here';
+        }
+    }
+
+    function showDashboard() {
+        if (!currentUser) return showPage('authPage');
+        renderHistory();
+        showPage('dashboardPage');
+        if (pendingInvite) showInviteBanner();
+    }
+
+    function clearHistory() {
+        if (!Object.keys(disputesDB).length) return toast('History is already empty.', 'info');
+        if (!confirm('Delete all locally stored dispute cases? This cannot be undone.')) return;
+        disputesDB = {};
+        localStorage.setItem('settlr_disputes', JSON.stringify(disputesDB));
+        renderHistory();
+        toast('Local dispute history cleared.', 'success');
+    }
+
+    function deadlineInfo(c) {
+        const resolvedAt = c.resolvedAt ? new Date(c.resolvedAt).getTime() : null;
+        if (!resolvedAt) return null;
+        const daysLeft = 7 - Math.floor((Date.now() - resolvedAt) / 86400000);
+        return { daysLeft };
+    }
+
+    function renderHistory() {
+        const list = $('historyList');
+        const cases = Object.values(disputesDB).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+
+        if (cases.length === 0) {
+            list.innerHTML = `<p class="text-xs text-slate-500 py-2">No past dispute history found. Create a new case above!</p>`;
+            return;
+        }
+
+        list.innerHTML = cases.map(c => {
+            let statusBadgeHtml = '';
+            const paid = c.payment && c.payment.status === 'paid';
+
+            if (paid) {
+                statusBadgeHtml = `<span class="text-emerald-400 font-medium">Settled</span> • <span class="text-slate-400">${escapeHtml(c.payment.provider)} ${escapeHtml(c.payment.txnId || '')}</span>`;
+            } else if (c.status === 'Pending Party B') {
+                statusBadgeHtml = `<span class="text-amber-400 font-medium">Pending Party B Input</span>`;
+            } else if (c.status === 'Resolved') {
+                const d = deadlineInfo(c);
+                const due = d && d.daysLeft > 0
+                    ? `Payment Due: Party B (${d.daysLeft} Day${d.daysLeft === 1 ? '' : 's'} Left)`
+                    : `<span class="text-rose-400">Payment Overdue</span>`;
+                statusBadgeHtml = `<span class="text-emerald-400 font-medium">Resolved</span> • <span class="text-indigo-300">${due}</span>`;
+            } else {
+                statusBadgeHtml = `<span class="text-slate-400 font-medium">${escapeHtml(c.status || 'Draft')}</span>`;
+            }
+
+            const amount = c.finance && c.finance.net > 0 ? ` · ${fmtMoney(c.finance.net)} net` : '';
+
+            return `
+                <div onclick="openCase('${escapeHtml(c.id)}')" class="bg-slate-900/80 hover:bg-slate-900 border border-slate-700/80 p-3.5 rounded-xl flex items-center justify-between cursor-pointer transition">
+                    <div class="flex items-center space-x-3 min-w-0">
+                        <span class="text-xs font-mono bg-indigo-950 text-indigo-300 border border-indigo-500/30 px-2 py-1 rounded shrink-0">${escapeHtml(c.id)}</span>
+                        <div class="min-w-0">
+                            <h4 class="text-xs font-semibold text-white capitalize truncate">${escapeHtml(c.category)} Dispute${amount}</h4>
+                            <p class="text-[10px] text-slate-400 truncate">${c.parties.length} Parties • Status: ${statusBadgeHtml}</p>
+                        </div>
+                    </div>
+                    <i class="fa-solid fa-chevron-right text-xs text-slate-500 shrink-0"></i>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function resetDisputeUI() {
+        partyCount = 0;
+        attachedFiles = [];
+        evidenceAnalysis = null;
+        financeState = null;
+        currentResult = null;
+        renderFileList();
+        $('partiesContainer').innerHTML = '';
+        $('evidenceAnalysisBox').classList.add('hidden');
+        $('analyzeBtnText').innerText = 'Analyze Attachments';
+        $('targetPartyEmail').value = '';
+        $('emailStatusBox').classList.add('hidden');
+    }
+
+    function startNewDispute(mode) {
+        activeMode = mode;
+        activeCaseId = 'SETTLR-' + Math.floor(1000 + Math.random() * 9000);
+        resetDisputeUI();
+        $('currentCaseId').innerText = activeCaseId;
+        $('caseIdBadge').classList.remove('hidden');
+
+        const submitBtnText = $('submitBtnText');
+
+        if (mode === 'single') {
+            $('inviteEmailContainer').classList.add('hidden');
+            addPartyField('Party A', '');
+            addPartyField('Party B', '');
+            $('addPartyBtnBox').classList.remove('hidden');
+            submitBtnText.innerText = "Generate Neutral Mediation";
+        } else {
+            $('inviteEmailContainer').classList.remove('hidden');
+            addPartyField(`Party A (${currentUser})`, '');
+            $('addPartyBtnBox').classList.add('hidden');
+            submitBtnText.innerText = "Create & Share Case ID";
+        }
+
+        $('emptyState').classList.remove('hidden');
+        $('remoteShareState').classList.add('hidden');
+        $('outputState').classList.add('hidden');
+        showPage('disputePage');
+    }
+
+    const DEMO_PARTY_A_STATEMENT = 'I transferred $300 for security deposit on May 1st. Payment confirmation screenshot attached.';
+
+    function joinCase(forcedId, invitedBy) {
+        const id = sanitizeCaseId(forcedId || $('joinCaseInput').value);
+        if (!id) return alert('Please enter a valid Case ID (format SETTLR-XXXX).');
+
+        $('joinCaseInput').value = id;
+
+        if (disputesDB[id]) return openCase(id);
+
+        activeCaseId = id;
+        activeMode = 'join';
+        resetDisputeUI();
+        $('currentCaseId').innerText = activeCaseId;
+        $('caseIdBadge').classList.remove('hidden');
+        $('inviteEmailContainer').classList.add('hidden');
+
+        const lockedLabel = invitedBy ? `Party A (${invitedBy}) — Submitted & Locked` : 'Party A (Submitted & Locked)';
+        addPartyField(lockedLabel, DEMO_PARTY_A_STATEMENT, true);
+        addPartyField(`Party B (${currentUser})`, '');
+
+        $('submitBtnText').innerText = "Submit & Run AI Mediation";
+        $('emptyState').classList.remove('hidden');
+        $('remoteShareState').classList.add('hidden');
+        $('outputState').classList.add('hidden');
+        showPage('disputePage');
+        toast(`Joined case ${id}. Party A's statement is locked — add your account of events.`, 'info', 5000);
+    }
+
+    function openCase(id) {
+        const c = disputesDB[id];
+        if (!c) return toast('That case is no longer stored on this device.', 'error');
+
+        activeCaseId = c.id;
+        activeMode = c.status === 'Pending Party B' ? 'join' : 'single';
+        resetDisputeUI();
+        $('currentCaseId').innerText = c.id;
+        $('caseIdBadge').classList.remove('hidden');
+        $('inviteEmailContainer').classList.add('hidden');
+
+        c.parties.forEach((p) => {
+            addPartyField(p.name, p.text, c.status === 'Pending Party B' && p.name.includes('Party A'));
+        });
+
+        if (c.status === 'Pending Party B') {
+            $('submitBtnText').innerText = 'Submit & Run AI Mediation';
+        }
+
+        if (c.result) {
+            detectedCurrency = c.currency || '$';
+            evidenceAnalysis = c.evidence || null;
+            renderResults(c.result);
+            $('emptyState').classList.add('hidden');
+            $('remoteShareState').classList.add('hidden');
+        } else {
+            $('createdCaseIdText').innerText = c.id;
+            if (c.inviteEmail) {
+                renderEmailStatus(
+                    c.emailStatus || 'simulated',
+                    c.inviteEmail,
+                    c.emailDetail || 'Invite previously dispatched from this device.'
+                );
+            }
+            $('emptyState').classList.add('hidden');
+            $('remoteShareState').classList.remove('hidden');
+            $('outputState').classList.add('hidden');
+        }
+        showPage('disputePage');
+    }
+
+    function addPartyField(customLabel = null, value = '', isLocked = false) {
+        partyCount++;
+        const label = customLabel || `Party ${String.fromCharCode(64 + partyCount)}`;
+        const container = $('partiesContainer');
+
+        const div = document.createElement('div');
+        div.className = 'space-y-1.5';
+        div.innerHTML = `
+            <div class="flex justify-between items-center">
+                <label class="block text-xs font-semibold uppercase tracking-wider text-indigo-400 truncate">${escapeHtml(label)}</label>
+                ${isLocked ? '<span class="shrink-0 text-[10px] bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded"><i class="fa-solid fa-lock mr-1 text-amber-400"></i>Unchangeable</span>' : ''}
+            </div>
+            <textarea rows="3" ${isLocked ? 'disabled' : ''} placeholder="Describe this party's account of events..."
+                class="party-input w-full bg-slate-900/80 border border-slate-700 rounded-lg p-3 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 ${isLocked ? 'opacity-60 cursor-not-allowed bg-slate-950' : ''}">${escapeHtml(value)}</textarea>
+        `;
+        container.appendChild(div);
+    }
+
+    function readParties() {
+        const inputs = document.querySelectorAll('.party-input');
+        return Array.from(inputs).map((input, idx) => ({
+            name: `Party ${String.fromCharCode(65 + idx)}`,
+            text: input.value
+        }));
+    }
+
+    $('disputeForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const partyTexts = readParties();
+        const category = $('disputeCategory').value;
+        detectedCurrency = detectCurrency(partyTexts.map(p => p.text).join('\n'));
+
+        if (activeMode === 'remote') {
+            const targetEmail = sanitizeEmail($('targetPartyEmail').value);
+            const rawEmail = $('targetPartyEmail').value.trim();
+            if (rawEmail && !targetEmail) {
+                return toast('That Party B email address looks invalid.', 'error');
+            }
+
+            $('submitBtn').disabled = true;
+            $('submitBtnText').innerText = 'Creating Case…';
+
+            if (attachedFiles.length && !evidenceAnalysis) await analyzeAttachments(true);
+
+            const record = {
+                id: activeCaseId,
+                category,
+                parties: partyTexts,
+                status: 'Pending Party B',
+                result: null,
+                evidence: evidenceAnalysis,
+                currency: detectedCurrency,
+                createdAt: new Date().toISOString(),
+                inviteEmail: targetEmail || null,
+                partyAEmail: currentUser
+            };
+
+            if (targetEmail) {
+                renderEmailStatus('sending', targetEmail, 'Contacting EmailJS…');
+                lastInviteArgs = [targetEmail, activeCaseId, currentUser];
+                const res = await sendPartyBInvite(targetEmail, activeCaseId, currentUser);
+                record.emailStatus = res.status;
+                record.emailDetail = res.detail;
+                renderEmailStatus(res.status, targetEmail, res.detail);
+                if (res.status === 'sent') toast(`Invite delivered to ${targetEmail}.`, 'success');
+                else if (res.status === 'error') toast('EmailJS delivery failed — see the case panel for details.', 'error', 6000);
+            } else {
+                $('emailStatusBox').classList.add('hidden');
+            }
+
+            disputesDB[activeCaseId] = record;
+            localStorage.setItem('settlr_disputes', JSON.stringify(disputesDB));
+
+            $('createdCaseIdText').innerText = activeCaseId;
+            $('emptyState').classList.add('hidden');
+            $('outputState').classList.add('hidden');
+            $('remoteShareState').classList.remove('hidden');
+            $('submitBtn').disabled = false;
+            $('submitBtnText').innerText = 'Create & Share Case ID';
+            return;
+        }
+
+        $('emptyState').classList.add('hidden');
+        $('remoteShareState').classList.add('hidden');
+        $('outputState').classList.add('hidden');
+        $('loadingState').classList.remove('hidden');
+        $('submitBtn').disabled = true;
+
+        if (attachedFiles.length && !evidenceAnalysis) await analyzeAttachments(true);
+
+        await new Promise(r => setTimeout(r, 1300));
+
+        const result = generateMockResolution(partyTexts, category, evidenceAnalysis);
+
+        disputesDB[activeCaseId] = {
+            id: activeCaseId,
+            category,
+            parties: partyTexts,
+            status: 'Resolved',
+            result,
+            finance: result.finance,
+            evidence: evidenceAnalysis,
+            currency: detectedCurrency,
+            createdAt: new Date().toISOString(),
+            resolvedAt: new Date().toISOString(),
+            payment: disputesDB[activeCaseId] && disputesDB[activeCaseId].payment ? disputesDB[activeCaseId].payment : null
+        };
+        localStorage.setItem('settlr_disputes', JSON.stringify(disputesDB));
+
+        $('submitBtn').disabled = false;
+        renderResults(result);
+    });
+
+    function copyCaseId() {
+        copyText(activeCaseId)
+            .then(() => toast(`Case ID (${activeCaseId}) copied. Send it to Party B.`, 'success'))
+            .catch(() => alert(`Case ID: ${activeCaseId}`));
+    }
+
+    function copyInviteLink() {
+        const link = buildInviteLink(activeCaseId);
+        copyText(link)
+            .then(() => toast('Invite link copied — Party B lands with the Case ID pre-filled.', 'success'))
+            .catch(() => alert(link));
+    }
+
+    function generateMockResolution(parties, category, evidence) {
+        const hasAttachments = attachedFiles.length > 0;
+        const finance = buildFinancialModel(parties, evidence);
+
+        const agreed = [
+            `All ${parties.length} parties acknowledge an underlying transaction took place.`,
+            hasAttachments
+                ? `Uploaded evidence (${attachedFiles.map(f => f.name).join(', ')}) verifies transaction timing.`
+                : "Primary timeline facts submitted are mutually accepted."
+        ];
+        if (evidence && evidence.items.length) {
+            evidence.items.forEach(it => agreed.push(`OCR-verified: ${it.headline} (${it.confidence}% confidence).`));
+        }
+        if (finance) {
+            agreed.push(`Monetary exposure of ${fmtMoney(finance.total)} is recognized by the mediator as the claim ceiling.`);
+        }
+
+        const settlement = finance
+            ? `Recommendation: settle at ${fmtMoney(finance.net)} net. ${finance.payerName} pays within 7 business days; on cleared payment all parties release each other from further informal obligations relating to this ${category} dispute.`
+            : `Multi-Party Recommendation: Parties agree to split the remaining net balance equally payable within 7 business days, releasing all involved parties from further informal obligations.`;
+
+        return {
+            summary: `This dispute involves ${parties.length} parties regarding a ${category} agreement. ${hasAttachments ? `The AI analyzed ${attachedFiles.length} attached evidence file(s) alongside written accounts.` : ''} Subjective emotional rhetoric has been removed.`,
+            agreed,
+            disputed: [
+                "Discrepancies regarding verbal modifications made to original terms.",
+                "Responsibility for offset expenses or unverified cash exchanges."
+            ],
+            settlement,
+            finance
+        };
+    }
+
+    function deductionClauses(text) {
+        return String(text || '')
+            .split(/[.!?\n;,]+|\band\b|\bso\b|\bbut\b/gi)
+            .filter(clause => clause.trim() && DEDUCTION_RE.test(clause));
+    }
+
+    function buildFinancialModel(parties, evidence) {
+        const perParty = parties.map((p, i) => ({
+            index: i,
+            name: p.name,
+            amounts: extractMoney(p.text),
+            deductions: extractMoney(deductionClauses(p.text).join(' '))
+        }));
+
+        const statementAmounts = perParty.flatMap(p => p.amounts.map(a => a.value));
+        const evidenceAmounts = (evidence && evidence.amounts) ? evidence.amounts : [];
+        const allAmounts = statementAmounts.concat(evidenceAmounts);
+
+        if (!allAmounts.length) return null;
+
+        const claimedTotals = perParty.map(p => p.amounts.reduce((s, a) => s + a.value, 0));
+        const total = Math.max(...claimedTotals.filter(v => v > 0), ...allAmounts);
+
+        let deductions = perParty.reduce((s, p) => s + p.deductions.filter(d => d.value < total).reduce((x, d) => x + d.value, 0), 0);
+        if (!deductions) {
+            const smaller = allAmounts.filter(v => v < total).sort((a, b) => b - a)[0];
+            if (smaller) deductions = smaller;
+        }
+        deductions = Math.min(deductions, total);
+
+        const net = Math.max(0, Math.round((total - deductions) * 100) / 100);
+        const n = parties.length;
+        const recommended = Array(n).fill(100 / n);
+
+        const payerIndex = n > 1 ? 1 : 0;
+
+        return {
+            total: Math.round(total * 100) / 100,
+            deductions: Math.round(deductions * 100) / 100,
+            net,
+            parties: parties.map(p => p.name),
+            recommended,
+            shares: recommended.slice(),
+            payerIndex,
+            payerName: parties[payerIndex] ? parties[payerIndex].name : 'Party B',
+            currency: detectedCurrency,
+            evidenceBacked: !!(evidence && evidence.items.length)
+        };
+    }
+
+    function renderResults(data) {
+        currentResult = data;
+
+        $('resSummary').innerText = data.summary;
+        $('resAgreed').innerHTML = data.agreed.map(i => `<li>${escapeHtml(i)}</li>`).join('');
+        $('resDisputed').innerHTML = data.disputed.map(i => `<li>${escapeHtml(i)}</li>`).join('');
+        $('resSettlement').innerText = data.settlement;
+
+        if (evidenceAnalysis && evidenceAnalysis.items.length) {
+            $('resEvidenceWrap').classList.remove('hidden');
+            $('resEvidence').innerHTML = evidenceAnalysis.items.map(it => `
+                <div class="flex items-start gap-2 bg-slate-900/50 border border-slate-800 rounded-lg px-3 py-2">
+                    <i class="fa-solid ${escapeHtml(it.icon)} text-indigo-400 text-[11px] mt-1"></i>
+                    <div class="min-w-0">
+                        <p class="text-[11px] text-slate-300 leading-relaxed">${escapeHtml(it.headline)}</p>
+                        <p class="text-[9px] text-slate-500 truncate">${escapeHtml(it.name)} · ${escapeHtml(it.kind)} · ${it.confidence}% confidence</p>
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            $('resEvidenceWrap').classList.add('hidden');
+        }
+
+        financeState = data.finance ? Object.assign({}, data.finance, { shares: data.finance.shares.slice() }) : null;
+        renderFinance();
+        renderSettleNow();
+
+        $('loadingState').classList.add('hidden');
+        $('remoteShareState').classList.add('hidden');
+        $('outputState').classList.remove('hidden');
+        $('outputState').classList.add('settlr-fade-up');
+    }
+
+    function renderFinance(skipSliderIdx) {
+        const section = $('financeSection');
+        if (!financeState || (financeState.net <= 0 && financeState.total <= 0)) {
+            section.classList.add('hidden');
+            return;
+        }
+        section.classList.remove('hidden');
+
+        const f = financeState;
+        const rows = [
+            { label: 'Total Claim Amount', value: fmtMoney(f.total), note: 'Highest verified monetary exposure across statements & evidence', tone: 'text-slate-100' },
+            { label: 'Agreed Deductions / Expenses', value: '− ' + fmtMoney(f.deductions), note: f.deductions > 0 ? 'Offset costs corroborated by submitted records' : 'No corroborated offset costs detected', tone: 'text-amber-300' },
+            { label: 'Final Net Amount Owed', value: fmtMoney(f.net), note: 'Payable within 7 business days of signature', tone: 'text-emerald-300', strong: true }
+        ];
+
+        $('financeTableBody').innerHTML = rows.map(r => `
+            <tr class="${r.strong ? 'bg-emerald-500/5' : ''}">
+                <td class="px-3 py-2.5 align-top">
+                    <p class="text-[11px] font-medium ${r.strong ? 'text-white' : 'text-slate-300'}">${escapeHtml(r.label)}</p>
+                    <p class="text-[9px] text-slate-500 leading-snug mt-0.5">${escapeHtml(r.note)}</p>
+                </td>
+                <td class="px-3 py-2.5 text-right align-middle">
+                    <span class="font-mono text-sm ${r.tone} ${r.strong ? 'font-bold' : ''}">${escapeHtml(r.value)}</span>
+                </td>
+            </tr>
+        `).join('') + f.parties.map((name, i) => {
+            const share = f.shares[i] || 0;
+            return `
+            <tr class="bg-slate-900/40">
+                <td class="px-3 py-2">
+                    <span class="inline-flex items-center gap-1.5 text-[11px] text-slate-300">
+                        <span class="w-2 h-2 rounded-full" style="background:${tintFor(i).bar}"></span>
+                        ${escapeHtml(name)} share${i === f.payerIndex ? ' <span class="text-[9px] text-slate-500">(payer)</span>' : ''}
+                    </span>
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-[11px] text-slate-300">
+                    ${share.toFixed(1)}% · ${fmtMoney(f.net * share / 100)}
+                </td>
+            </tr>`;
+        }).join('');
+
+        $('splitBar').innerHTML = f.parties.map((name, i) => {
+            const share = f.shares[i] || 0;
+            return share <= 0.2 ? '' : `<div class="h-full transition-all duration-300" style="width:${share}%;background:${tintFor(i).bar}" title="${escapeHtml(name)}: ${share.toFixed(1)}%"></div>`;
+        }).join('');
+
+        const total = f.shares.reduce((s, v) => s + v, 0);
+        $('splitTotalBadge').innerText = `${total.toFixed(0)}% allocated`;
+        $('splitTotalBadge').className = `text-[10px] font-mono ${Math.abs(total - 100) < 0.6 ? 'text-emerald-400' : 'text-amber-400'}`;
+
+        $('splitLegend').innerHTML = f.parties.map((name, i) => `
+            <span class="inline-flex items-center gap-1.5 text-[10px] text-slate-400">
+                <span class="w-2 h-2 rounded-full" style="background:${tintFor(i).bar}"></span>
+                ${escapeHtml(name)} <strong class="text-slate-200 font-mono">${(f.shares[i] || 0).toFixed(1)}%</strong>
+            </span>
+        `).join('');
+
+        $('shareSliders').innerHTML = f.parties.map((name, i) => `
+            <div class="flex items-center gap-3">
+                <span class="w-20 shrink-0 text-[10px] font-medium ${tintFor(i).text} truncate" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
+                <input type="range" min="0" max="100" step="0.1" value="${(f.shares[i] || 0).toFixed(1)}"
+                       data-idx="${i}"
+                       oninput="onShareInput(${i}, this.value)"
+                       class="settlr-range flex-1">
+                <span class="w-24 shrink-0 text-right font-mono text-[10px] text-slate-300">${fmtMoney(f.net * (f.shares[i] || 0) / 100)}</span>
+            </div>
+        `).join('');
+
+        if (typeof skipSliderIdx === 'number') {
+            const el = $('shareSliders').querySelector(`input[data-idx="${skipSliderIdx}"]`);
+            if (el) el.value = (f.shares[skipSliderIdx] || 0).toFixed(1);
+        }
+
+        const payerShare = f.shares[f.payerIndex] || 0;
+        const owed = f.net * payerShare / 100;
+        $('netOwedCallout').innerHTML = `
+            <div class="flex items-center justify-between gap-3">
+                <div>
+                    <p class="text-[10px] uppercase tracking-wider text-emerald-400/80 font-semibold">Net payable by ${escapeHtml(f.payerName)}</p>
+                    <p class="text-lg font-bold font-mono text-emerald-300">${fmtMoney(owed)}</p>
+                </div>
+                <div class="text-right">
+                    <p class="text-[10px] text-slate-400">Retained by ${escapeHtml(f.parties[0] || 'Party A')}</p>
+                    <p class="text-sm font-mono text-slate-200">${fmtMoney(f.net * (f.shares[0] || 0) / 100)}</p>
+                </div>
+            </div>
+        `;
+    }
+
+    function onShareInput(idx, value) {
+        const f = financeState;
+        if (!f) return;
+        const next = Math.min(100, Math.max(0, Number(value) || 0));
+        const others = f.shares.map((_, i) => i).filter(i => i !== idx);
+        const remaining = 100 - next;
+        const othersTotal = others.reduce((s, i) => s + f.shares[i], 0);
+
+        if (othersTotal <= 0) {
+            others.forEach(i => { f.shares[i] = remaining / Math.max(1, others.length); });
+        } else {
+            others.forEach(i => { f.shares[i] = (f.shares[i] / othersTotal) * remaining; });
+        }
+        f.shares[idx] = next;
+        renderFinance(idx);
+        renderSettleNow();
+        persistFinance();
+    }
+
+    function resetShares() {
+        if (!financeState) return;
+        financeState.shares = financeState.recommended.slice();
+        renderFinance();
+        renderSettleNow();
+        persistFinance();
+        toast('Split reset to the AI-recommended equal allocation.', 'info');
+    }
+
+    function persistFinance() {
+        const c = disputesDB[activeCaseId];
+        if (!c || !financeState) return;
+        c.finance = financeState;
+        if (c.result) c.result.finance = financeState;
+        localStorage.setItem('settlr_disputes', JSON.stringify(disputesDB));
+    }
+
+    const PROVIDERS = {
+        stripe: { name: 'Stripe', icon: 'fa-brands fa-stripe', color: 'indigo', blurb: 'Card payment held in Settlr escrow until both parties confirm.' },
+        paypal: { name: 'PayPal', icon: 'fa-brands fa-paypal', color: 'sky', blurb: 'Balance or linked-card transfer routed through sandbox checkout.' },
+        escrow: { name: 'Bank / Escrow', icon: 'fa-solid fa-building-columns', color: 'emerald', blurb: 'Direct transfer reference recorded against the case ledger.' }
+    };
+
+    function currentOwed() {
+        if (!financeState) return 0;
+        return Math.round(financeState.net * (financeState.shares[financeState.payerIndex] || 0)) / 100;
+    }
+
+    function casePayment() {
+        const c = disputesDB[activeCaseId];
+        return c && c.payment ? c.payment : null;
+    }
+
+    function renderSettleNow() {
+        const section = $('settleSection');
+        const body = $('settleBody');
+        if (!financeState || financeState.net <= 0) { section.classList.add('hidden'); return; }
+        section.classList.remove('hidden');
+
+        const payment = casePayment();
+        const owed = currentOwed();
+        const c = disputesDB[activeCaseId] || {};
+        const d = deadlineInfo(c);
+
+        if (payment && payment.status === 'paid') {
+            body.innerHTML = `
+                <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-4 space-y-2">
+                    <p class="text-xs font-semibold text-emerald-300 flex items-center"><i class="fa-solid fa-circle-check mr-2"></i> Settlement paid into escrow</p>
+                    <div class="grid grid-cols-2 gap-2 text-[10px] text-slate-300 font-mono">
+                        <span>Amount: <strong class="text-white">${escapeHtml(fmtMoney(payment.amount))}</strong></span>
+                        <span>Provider: <strong class="text-white">${escapeHtml(payment.provider)}</strong></span>
+                        <span>Txn: <strong class="text-white">${escapeHtml(payment.txnId)}</strong></span>
+                        <span>Paid: <strong class="text-white">${escapeHtml(new Date(payment.paidAt).toLocaleString())}</strong></span>
+                    </div>
+                    <p class="text-[10px] text-slate-400">Escrow releases to ${escapeHtml(financeState.parties[0] || 'Party A')} after the 48-hour contest window closes.</p>
+                    <button onclick="downloadMemorandum()" class="mt-1 text-[10px] underline text-emerald-300 hover:text-emerald-200">Download the executed memorandum</button>
+                </div>`;
+            return;
+        }
+
+        body.innerHTML = `
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/60 border border-slate-700 rounded-lg p-3">
+                <div>
+                    <p class="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">${escapeHtml(financeState.payerName)} owes</p>
+                    <p class="text-xl font-bold font-mono text-white">${fmtMoney(owed)}</p>
+                </div>
+                <div class="text-[10px] text-slate-400 sm:text-right">
+                    <p><i class="fa-regular fa-clock mr-1 text-amber-400"></i>Deadline: 7 business days${d ? ` (${Math.max(0, d.daysLeft)} left)` : ''}</p>
+                    <p class="text-slate-500">Case <span class="font-mono">${escapeHtml(activeCaseId || '')}</span></p>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                ${Object.entries(PROVIDERS).map(([key, p]) => `
+                    <button onclick="openPaymentModal('${key}')"
+                        class="bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-indigo-500/60 rounded-lg px-3 py-2.5 text-left transition group">
+                        <i class="${escapeHtml(p.icon)} text-base text-slate-300 group-hover:text-indigo-300 transition"></i>
+                        <p class="text-[11px] font-medium text-slate-200 mt-1">${escapeHtml(p.name)}</p>
+                        <p class="text-[9px] text-slate-500">Sandbox checkout</p>
+                    </button>
+                `).join('')}
+            </div>
+            <p class="text-[9px] text-slate-500 leading-relaxed pt-1">
+                <i class="fa-solid fa-shield-halved mr-1"></i>
+                No live processor is contacted. Card fields are pre-filled with publicly documented Stripe test values and nothing leaves this browser.
+            </p>
+        `;
+    }
+
+    let activeProvider = 'stripe';
+
+    function openPaymentModal(provider) {
+        activeProvider = provider in PROVIDERS ? provider : 'stripe';
+        const p = PROVIDERS[activeProvider];
+        const owed = currentOwed();
+        if (owed <= 0) return toast('No payable amount was detected for this case.', 'warn');
+
+        $('payModalIcon').className = `${p.icon} text-indigo-400`;
+        $('payModalTitle').innerText = `${p.name} Sandbox Checkout`;
+
+        $('payModalBody').innerHTML = `
+            <div class="space-y-4">
+                <div class="flex items-center justify-between bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5">
+                    <div>
+                        <p class="text-[9px] uppercase tracking-wider text-slate-500">Amount due</p>
+                        <p class="text-lg font-bold font-mono text-white">${fmtMoney(owed)}</p>
+                    </div>
+                    <div class="text-right">
+                        <p class="text-[9px] uppercase tracking-wider text-slate-500">Case</p>
+                        <p class="text-[11px] font-mono text-indigo-300">${escapeHtml(activeCaseId || '')}</p>
+                    </div>
+                </div>
+
+                <p class="text-[10px] text-slate-400 leading-relaxed">${escapeHtml(p.blurb)}</p>
+
+                ${activeProvider === 'paypal' ? `
+                    <div class="space-y-2">
+                        <label class="block text-[10px] font-semibold text-slate-400">Sandbox PayPal account</label>
+                        <input type="email" value="partyb-buyer@settlr.sandbox" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-indigo-500">
+                        <p class="text-[9px] text-slate-500">You would normally be redirected to paypal.com/sandbox. Simulated locally.</p>
+                    </div>
+                ` : activeProvider === 'escrow' ? `
+                    <div class="space-y-2">
+                        <label class="block text-[10px] font-semibold text-slate-400">Transfer reference</label>
+                        <input type="text" value="${escapeHtml(activeCaseId || '')}-SETTLE" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs font-mono text-white focus:outline-none focus:border-indigo-500">
+                        <div class="text-[10px] text-slate-400 bg-slate-900 border border-slate-700 rounded-lg p-2.5 font-mono space-y-0.5">
+                            <p>IBAN: GB00 SETL 0000 0000 0000</p>
+                            <p>Beneficiary: Settlr Escrow (Sandbox)</p>
+                        </div>
+                    </div>
+                ` : `
+                    <div class="space-y-2.5">
+                        <div>
+                            <label class="block text-[10px] font-semibold text-slate-400 mb-1">Card number</label>
+                            <input type="text" id="payCard" value="4242 4242 4242 4242" maxlength="23"
+                                class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs font-mono text-white focus:outline-none focus:border-indigo-500">
+                        </div>
+                        <div class="grid grid-cols-2 gap-2.5">
+                            <div>
+                                <label class="block text-[10px] font-semibold text-slate-400 mb-1">Expiry</label>
+                                <input type="text" value="12 / 29" maxlength="7"
+                                    class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs font-mono text-white focus:outline-none focus:border-indigo-500">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-semibold text-slate-400 mb-1">CVC</label>
+                                <input type="text" value="123" maxlength="4"
+                                    class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs font-mono text-white focus:outline-none focus:border-indigo-500">
+                            </div>
+                        </div>
+                        <p class="text-[9px] text-slate-500">4242… is Stripe's public test card. No network request is made.</p>
+                    </div>
+                `}
+
+                <button onclick="processSandboxPayment()" id="payNowBtn"
+                    class="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium py-3 rounded-lg shadow-lg shadow-indigo-600/25 transition flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-lock"></i> Pay ${fmtMoney(owed)}
+                </button>
+                <button onclick="closePaymentModal()" class="w-full text-[11px] text-slate-500 hover:text-slate-300 transition">Cancel</button>
+            </div>
+        `;
+
+        $('paymentModal').classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+    }
+
+    function closePaymentModal() {
+        $('paymentModal').classList.add('hidden');
+        document.body.style.overflow = '';
+    }
+
+    async function processSandboxPayment() {
+        const btn = $('payNowBtn');
+        if (!btn) return;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Authorizing…';
+
+        const steps = ['Tokenizing card…', 'Contacting sandbox gateway…', 'Reserving escrow hold…'];
+        for (const s of steps) {
+            await new Promise(r => setTimeout(r, 520));
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${escapeHtml(s)}`;
+        }
+
+        const owed = currentOwed();
+        const provider = PROVIDERS[activeProvider].name;
+        const txnId = 'txn_settlr_' + Math.random().toString(36).slice(2, 10).toUpperCase();
+
+        const payment = { status: 'paid', provider, txnId, amount: owed, paidAt: new Date().toISOString(), mode: 'sandbox' };
+        if (disputesDB[activeCaseId]) {
+            disputesDB[activeCaseId].payment = payment;
+            localStorage.setItem('settlr_disputes', JSON.stringify(disputesDB));
+        }
+
+        $('payModalBody').innerHTML = `
+            <div class="text-center space-y-3 py-2">
+                <div class="w-14 h-14 mx-auto bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 rounded-full flex items-center justify-center">
+                    <i class="fa-solid fa-check text-xl"></i>
+                </div>
+                <h4 class="text-base font-semibold text-white">Payment captured</h4>
+                <p class="text-[11px] text-slate-400 leading-relaxed">
+                    ${fmtMoney(owed)} is held in Settlr escrow for case <span class="font-mono text-indigo-300">${escapeHtml(activeCaseId || '')}</span>.
+                </p>
+                <div class="bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-left text-[10px] font-mono text-slate-400 space-y-1">
+                    <p>provider : ${escapeHtml(provider)} (sandbox)</p>
+                    <p>txn_id   : ${escapeHtml(txnId)}</p>
+                    <p>release  : ${escapeHtml(new Date(Date.now() + 172800000).toLocaleString())}</p>
+                </div>
+                <button onclick="closePaymentModal()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium py-2.5 rounded-lg transition">Done</button>
+            </div>
+        `;
+
+        renderSettleNow();
+        renderHistory();
+        toast(`Sandbox payment of ${fmtMoney(owed)} recorded (${txnId}).`, 'success', 5000);
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !$('paymentModal').classList.contains('hidden')) closePaymentModal();
+    });
+
+    function sealHash(input) {
+        let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+        for (let i = 0; i < input.length; i++) {
+            const ch = input.charCodeAt(i);
+            h1 = Math.imul(h1 ^ ch, 2654435761);
+            h2 = Math.imul(h2 ^ ch, 1597334677);
+        }
+        h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+        h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+        return (h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0');
+    }
+
+    function buildMemorandumHtml() {
+        const data = currentResult;
+        const f = financeState;
+        const c = disputesDB[activeCaseId] || {};
+        const parties = (c.parties && c.parties.length ? c.parties : readParties());
+        const generated = new Date();
+        const seal = sealHash(JSON.stringify({ id: activeCaseId, s: data.settlement, t: generated.getTime() })).slice(0, 16).toUpperCase();
+
+        const li = (arr) => arr.map(x => `<li style="margin:0 0 5px 0;padding-left:2px;">${escapeHtml(x)}</li>`).join('');
+
+        const h3 = 'font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:#4f46e5;margin:0 0 8px 0;font-weight:700;';
+        const td = 'padding:6px 8px;border-bottom:1px solid #e2e8f0;color:#334155;vertical-align:top;';
+        const tdR = td + 'text-align:right;font-family:monospace;';
+        const th = 'padding:6px 8px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:0.05em;color:#475569;border-bottom:1px solid #cbd5e1;';
+
+        const financeHtml = f ? `
+            <h3 style="${h3}">4. Financial Settlement</h3>
+            <table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:10px;">
+                <tbody>
+                    <tr><td style="${td}">Total Claim Amount</td><td style="${tdR}">${escapeHtml(fmtMoney(f.total))}</td></tr>
+                    <tr><td style="${td}">Agreed Deductions / Verified Expenses</td><td style="${tdR}">− ${escapeHtml(fmtMoney(f.deductions))}</td></tr>
+                    <tr style="background:#ecfdf5;"><td style="${td}font-weight:700;">Final Net Amount Owed</td><td style="${tdR}font-weight:700;color:#047857;">${escapeHtml(fmtMoney(f.net))}</td></tr>
+                    ${f.parties.map((name, i) => `
+                        <tr>
+                            <td style="${td}color:#475569;">${escapeHtml(name)} — liability share${i === f.payerIndex ? ' (payer)' : ''}</td>
+                            <td style="${tdR}color:#475569;">${(f.shares[i] || 0).toFixed(1)}% · ${escapeHtml(fmtMoney(f.net * (f.shares[i] || 0) / 100))}</td>
+                        </tr>`).join('')}
+                </tbody>
+            </table>
+            <div style="display:flex;height:12px;width:100%;border-radius:6px;overflow:hidden;border:1px solid #e2e8f0;margin-bottom:6px;">
+                ${f.parties.map((name, i) => `<div style="width:${f.shares[i] || 0}%;background:${tintFor(i).bar};"></div>`).join('')}
+            </div>
+            <div style="font-size:9px;color:#64748b;margin-bottom:14px;">
+                ${f.parties.map((name, i) => `<span style="margin-right:12px;"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${tintFor(i).bar};margin-right:4px;"></span>${escapeHtml(name)} ${(f.shares[i] || 0).toFixed(1)}%</span>`).join('')}
+            </div>` : '';
+
+        const evidenceHtml = (evidenceAnalysis && evidenceAnalysis.items.length) ? `
+            <h3 style="${h3}">${f ? '5' : '4'}. Evidence Appendix — Vision / OCR Extraction</h3>
+            <table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:14px;">
+                <thead><tr style="background:#f1f5f9;">
+                    <th style="${th}">Exhibit</th><th style="${th}">Classification</th><th style="${th}">Extracted Finding</th><th style="${th}text-align:right;">Confidence</th>
+                </tr></thead>
+                <tbody>
+                    ${evidenceAnalysis.items.map((it, i) => `
+                        <tr>
+                            <td style="${td}">Exhibit ${String.fromCharCode(65 + i)}<br><span style="color:#94a3b8;font-size:8px;">${escapeHtml(it.name)}</span></td>
+                            <td style="${td}">${escapeHtml(it.kind)}</td>
+                            <td style="${td}">${escapeHtml(it.headline)}</td>
+                            <td style="${tdR}">${it.confidence}%</td>
+                        </tr>`).join('')}
+                </tbody>
+            </table>` : '';
+
+        const signatureBlock = parties.map((p, i) => `
+            <div style="flex:1;min-width:200px;">
+                <div style="height:38px;border-bottom:1.5px solid #334155;"></div>
+                <p style="margin:6px 0 0 0;font-size:11px;font-weight:700;color:#0f172a;">${escapeHtml(`Party ${String.fromCharCode(65 + i)}`)} Signature</p>
+                <p style="margin:2px 0 0 0;font-size:9px;color:#64748b;">${escapeHtml(p.name || '')}</p>
+                <p style="margin:12px 0 0 0;font-size:9px;color:#64748b;">Print name: ______________________</p>
+                <p style="margin:8px 0 0 0;font-size:9px;color:#64748b;">Date: ___________________________</p>
+            </div>
+        `).join('');
+
+        return `
+            <div style="font-family:ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 24px; color: #0f172a; background: #ffffff;">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #6366f1;padding-bottom:12px;margin-bottom:16px;">
+                    <div>
+                        <h1 style="font-size:20px;font-weight:800;color:#0f172a;margin:0;">Settlr<span style="color:#6366f1;">.ai</span></h1>
+                        <p style="font-size:10px;color:#64748b;margin:2px 0 0 0;">Binding Neutral Mediation Memorandum</p>
+                    </div>
+                    <div style="text-align:right;font-family:monospace;font-size:10px;color:#475569;">
+                        <p style="margin:0;font-weight:700;color:#4f46e5;">CASE ID: ${escapeHtml(activeCaseId || '')}</p>
+                        <p style="margin:2px 0 0 0;">Generated: ${escapeHtml(generated.toISOString().slice(0, 10))}</p>
+                        <p style="margin:2px 0 0 0;font-size:8px;color:#94a3b8;">SEAL: ${escapeHtml(seal)}</p>
+                    </div>
+                </div>
+
+                <div style="margin-bottom:14px;background:#f8fafc;padding:10px;border-radius:6px;border:1px solid #e2e8f0;font-size:10px;">
+                    <p style="margin:0 0 4px 0;font-weight:700;color:#334155;text-transform:uppercase;">Dispute Category: ${escapeHtml(c.category || $('disputeCategory').value)}</p>
+                    <p style="margin:0;color:#64748b;">Participating Parties: ${escapeHtml(parties.map(p => p.name).join(', '))}</p>
+                </div>
+
+                <h3 style="${h3}">1. Case Summary</h3>
+                <p style="font-size:11px;line-height:1.5;color:#334155;margin:0 0 14px 0;">${escapeHtml(data.summary)}</p>
+
+                <div style="display:flex;gap:12px;margin-bottom:14px;">
+                    <div style="flex:1;background:#f0fdf4;border:1px solid #bbf7d0;padding:10px;border-radius:6px;">
+                        <h3 style="${h3}color:#166534;">2. Points of Agreement</h3>
+                        <ul style="margin:0;padding-left:14px;font-size:10px;color:#14532d;line-height:1.4;">${li(data.agreed)}</ul>
+                    </div>
+                    <div style="flex:1;background:#fff1f2;border:1px solid #fecdd3;padding:10px;border-radius:6px;">
+                        <h3 style="${h3}color:#9f1239;">3. Points of Dispute</h3>
+                        <ul style="margin:0;padding-left:14px;font-size:10px;color:#881337;line-height:1.4;">${li(data.disputed)}</ul>
+                    </div>
+                </div>
+
+                ${financeHtml}
+                ${evidenceHtml}
+
+                <h3 style="${h3}">${f ? (evidenceAnalysis && evidenceAnalysis.items.length ? '6' : '5') : (evidenceAnalysis && evidenceAnalysis.items.length ? '5' : '4')}. Binding Resolution Terms</h3>
+                <div style="background:#eef2ff;border:1px solid #c7d2fe;padding:12px;border-radius:6px;margin-bottom:18px;">
+                    <p style="font-size:11px;line-height:1.5;font-weight:600;color:#312e81;margin:0;">${escapeHtml(data.settlement)}</p>
+                </div>
+
+                <h3 style="${h3}">Execution & Signatures</h3>
+                <p style="font-size:9px;color:#64748b;margin:0 0 12px 0;">By signing below, all participating parties agree to accept the terms of this mediated resolution as final and non-appealable.</p>
+
+                <div style="display:flex;gap:16px;flex-wrap:wrap;">
+                    ${signatureBlock}
+                </div>
+
+                <div style="margin-top:24px;border-top:1px solid #e2e8f0;padding-top:8px;text-align:center;font-size:8px;color:#94a3b8;">
+                    Generated by Settlr.ai (Qwen Powered) • Tamper-evident hash: ${escapeHtml(seal)} • Page 1 of 1
+                </div>
+            </div>
+        `;
+    }
+
+    function copyResolution() {
+        if (!currentResult) return;
+        const text = `Settlr.ai Resolution Case [${activeCaseId}]\n\nSummary:\n${currentResult.summary}\n\nProposed Settlement:\n${currentResult.settlement}`;
+        copyText(text)
+            .then(() => toast('Resolution text copied to clipboard.', 'success'))
+            .catch(() => alert(text));
+    }
+
+    async function downloadMemorandum() {
+        if (!currentResult) return;
+        const btnText = $('pdfBtnText');
+        const originalText = btnText.innerText;
+        btnText.innerText = 'Generating PDF...';
+
+        const element = document.createElement('div');
+        element.innerHTML = buildMemorandumHtml();
+        document.body.appendChild(element);
+
+        const opt = {
+            margin:       [0.3, 0.3, 0.3, 0.3],
+            filename:     `Settlr_Resolution_${activeCaseId}.pdf`,
+            image:        { type: 'jpeg', quality: 0.98 },
+            html2canvas:  { scale: 2, logging: false, useCORS: true },
+            jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' }
+        };
+
+        try {
+            await html2pdf().set(opt).from(element).save();
+            toast('Memorandum downloaded successfully!', 'success');
+        } catch (err) {
+            console.error('PDF export error:', err);
+            toast('Failed to generate PDF. Copying resolution text instead.', 'warn');
+            copyResolution();
+        } finally {
+            document.body.removeChild(element);
+            btnText.innerText = originalText;
+        }
+    }
+
+    // Initialize application state on page load
+    window.addEventListener('DOMContentLoaded', () => {
+        refreshEmailStatusPill();
+        handleIncomingCaseLink();
+    });
+    </script>
+</body>
+</html>
